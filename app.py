@@ -1,9 +1,8 @@
-from functools import lru_cache
 from pathlib import Path
-import pickle
-import json
 from prediction_monitor import init_db
 import pandas as pd
+from model_registry import get_model
+
 from flask import (
     Flask,
     render_template,
@@ -46,26 +45,6 @@ valid_flights = {
     (row["Source"], row["Destination"], row["Airline"], str(row["stops"]))
     for row in flight_options
 }
-
-
-# loads and caches the current model version
-@lru_cache(maxsize=4)
-def load_model(version):
-    model_path = MODELS_DIR / version / "model.pkl"
-
-    with open(model_path, "rb") as f:
-        return pickle.load(f)
-
-
-# retrieves current model version
-def get_model():
-    with open(MODELS_DIR / "active_model.json", "r") as f:
-        version = json.load(f)["active_version"]
-
-    with open(MODELS_DIR / version / "metadata.json", "r") as f:
-        metadata = json.load(f)
-
-    return load_model(version), metadata, version
 
 
 def show_home(prediction_text="", error_text="", form_values=None, interval_text=""):
@@ -139,7 +118,11 @@ def predict():
         start = perf_counter()
 
         model, metadata, version = get_model()
+
+
+        
         predicted_fare = float(model.predict(flight)[0])
+
 
         interval = metadata["prediction_interval"]
         margin = interval["margin"]

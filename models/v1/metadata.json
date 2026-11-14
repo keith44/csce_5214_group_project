@@ -13,7 +13,7 @@
         "arrival_minute",
         "minutes"
     ],
-    "trained_at": "2026-11-09T21:11:23.661315+00:00",
+    "trained_at": "2026-11-14T17:11:23.202498+00:00",
     "validation_r2": 0.7520208687964747,
     "validation_mae": 1371.8719609311286,
     "validation_rmse": 1947.355352407159,
