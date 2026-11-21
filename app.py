@@ -346,23 +346,23 @@ def compare_dates():
             arr = arrival + pd.Timedelta(days=offset)
             flights.append(make_flight(compare_airline, dep, arr))
 
-        # Gets the predictions and metadata for the flights for the airline comparison and date comparison.
+                # Get predictions and metadata for airline and date comparisons.
+        predictions, metadata = run_predictions(
+            flights,
             "date_comparison",
             all_airlines + [compare_airline] * 7,
-            [departure.strftime("%Y-%m-%d")] * len(all_airlines)
-            + [
+            [departure.strftime("%Y-%m-%d")] * len(all_airlines) + [
                 (departure + pd.Timedelta(days=i)).strftime("%Y-%m-%d")
                 for i in range(-3, 4)
             ],
             log_indices=range(len(all_airlines), len(flights)),
         )
 
-        # get the card prices and date prices from the predictions list. 
-        
+        # Separate airline and date prediction results.
         card_prices = predictions[:len(all_airlines)]
         date_prices = predictions[len(all_airlines):]
 
-        # get the interval, margin, and coverage from the metadata for the prediction interval.
+        # Get the prediction interval metadata.
         interval = metadata["prediction_interval"]
         margin = interval["margin"]
         coverage = interval["coverage"]
