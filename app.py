@@ -1,7 +1,10 @@
 from pathlib import Path
 from prediction_monitor import init_db
 import pandas as pd
-from model_registry import get_model
+from model_registry import get_model, list_models, activate_model
+from prediction_monitor import init_db, log_prediction, get_predictions
+from model_registry import register_model
+from tempfile import TemporaryDirectory
 
 from flask import (
     Flask,
@@ -119,10 +122,7 @@ def predict():
 
         model, metadata, version = get_model()
 
-
-        
         predicted_fare = float(model.predict(flight)[0])
-
 
         interval = metadata["prediction_interval"]
         margin = interval["margin"]
@@ -173,6 +173,65 @@ def predict():
             ),
             500,
         )
+
+
+@app.route("/admin")
+def admin():
+    models = list_models()
+    predictions = get_predictions().sort_values("timestamp", ascending=False).head(20)
+
+    return render_template(
+        "admin.html", models=models, predictions=predictions.to_dict(orient="records")
+    )
+
+
+@app.route("/admin/register", methods=["POST"])
+def admin_register():
+    version = request.form.get("version", "").strip()
+    model_file = request.files.get("model_file")
+    metadata_file = request.files.get("metadata_file")
+
+    if not version or not model_file or not metadata_file:
+        flash("Please provide a version, model file, and metadata file.", "admin")
+        return redirect(url_for("admin"))
+
+    if not version.startswith("v") or not version[1:].isdigit():
+        flash("Model version must use the format v5, v6, etc.", "admin")
+        return redirect(url_for("admin"))
+
+    if not model_file.filename.endswith(".pkl") or not metadata_file.filename.endswith(
+        ".json"
+    ):
+        flash("Please upload a .pkl model and a .json metadata file.", "admin")
+        return redirect(url_for("admin"))
+
+    try:
+        with TemporaryDirectory() as temp_dir:
+            model_path = Path(temp_dir) / "model.pkl"
+            metadata_path = Path(temp_dir) / "model_metadata.json"
+
+            model_file.save(model_path)
+            metadata_file.save(metadata_path)
+
+            register_model(model_path, version)
+
+        flash(f"Model {version} registered successfully.", "admin")
+
+    except (FileExistsError, FileNotFoundError, ValueError) as e:
+        flash(str(e), "admin")
+
+    return redirect(url_for("admin"))
+
+
+@app.route("/admin/activate/<version>", methods=["POST"])
+def admin_activate(version):
+    try:
+        activate_model(version)
+        flash(f"Model {version} activated successfully.", "admin")
+    except FileNotFoundError as e:
+        flash(str(e), "admin")
+
+    return redirect(url_for("admin"))
 
 
 if __name__ == "__main__":

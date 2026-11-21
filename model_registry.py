@@ -71,4 +71,23 @@ def get_model():
 
     return load_model(version), metadata, version
 
+# lists all registered models with their metadata and active status
+def list_models():
+    with open(ACTIVE_FILE, "r") as f:
+        active_version = json.load(f)["active_version"]
 
+    models = []
+
+    for model_dir in sorted(MODELS_DIR.glob("v*")):
+        metadata_file = model_dir / "metadata.json"
+
+        if not metadata_file.is_file():
+            continue
+
+        with open(metadata_file, "r") as f:
+            metadata = json.load(f)
+
+        metadata["active"] = model_dir.name == active_version
+        models.append(metadata)
+
+    return models
