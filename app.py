@@ -27,7 +27,7 @@ app.secret_key = os.environ.get("SECRET_KEY", "flight-project-local-development"
 # initialize prediction monitor database
 init_db()
 
-# The available choices come from train.csv, not hardcoded airline/city lists.
+# The available choices come from train.csv, replacing the hardcoded airline/city lists in the home.html template.
 training_data = pd.read_csv(
     BASE_DIR / "train.csv",
     usecols=["Source", "Destination", "Airline", "Total_Stops"],
@@ -49,15 +49,16 @@ valid_flights = {
     for row in flight_options
 }
 
-
+# This function is used to run predictions and log them in the database. It is called from both the /predict and /compare-dates routes.
 def run_predictions(flights, prediction_type, airlines, dates, log_indices=None):
     start = perf_counter()
-
+    # Get the active model version and metadata then make predictions.
     model, metadata, version = get_model()
     prices = model.predict(pd.DataFrame(flights))
 
     response_time = (perf_counter() - start) * 1000
 
+    # logic to log predictions and loop through the log_indices to log each prediction in the database
     if log_indices is None:
         log_indices = range(len(prices))
 
@@ -74,7 +75,9 @@ def run_predictions(flights, prediction_type, airlines, dates, log_indices=None)
 
     return prices, metadata
 
-
+# Helper function to render the home page
+# takes in the prediction text, error text, form values, interval text, flight summary, date comparison, 
+# potential savings, date comparison airline, and airline comparisons and returns the rendered home.html template
 def show_home(
     prediction_text="",
     error_text="",
@@ -103,7 +106,7 @@ def show_home(
             }
         )
 
-    # Additional airline predictions
+    # Additional airline predictions from the airline comparison form
     for comparison in airline_comparisons:
         flight_cards.append(
             {
@@ -174,6 +177,8 @@ def predict():
         )
     start = perf_counter()
     version = None
+    # this block is used to validate the departure and arrival times, calculate the duration, and prepare 
+    # the flight data for prediction. It also handles exceptions and logs predictions in case of errors.
     try:
         departure = pd.to_datetime(form["Dep_Time"], format="%Y-%m-%dT%H:%M")
         arrival = pd.to_datetime(form["Arrival_Time"], format="%Y-%m-%dT%H:%M")
@@ -181,7 +186,7 @@ def predict():
         if duration_minutes < 30:
             raise ValueError("Arrival must be at least 30 minutes after departure.")
 
-        # Match the feature names and types in Flight_Price_Prediction_Student_Fixed.ipynb.
+        # Match the feature names and types in the training data.
         # The saved pipeline handles categorical one-hot encoding automatically.
         flight = pd.DataFrame(
             [
@@ -220,7 +225,10 @@ def predict():
 
         response_time = (perf_counter() - start) * 1000
 
-       
+        # This allows the prediction results to be displayed on the home page,
+        # including the predicted fare, prediction interval, flight summary, and form values.
+        # The results are flashed, then the browser is redirected to the home page.
+        # This prevents the prediction form from being resubmitted when the page is refreshed.
         flash(
             {
                 "prediction_text": f"Rs. {predicted_fare:,.2f}",
@@ -269,7 +277,10 @@ def predict():
             500,
         )
 
-
+# This route is used to compare flight prices for different departure dates for the same airline. 
+# It takes in the source, destination, airline, stops, departure time, arrival time, and comparison
+# airline from the form. It validates the input and generates predictions for the selected airline 
+# and the comparison airline for + or - 3 days around the selected departure date. 
 @app.route("/compare-dates", methods=["POST"])
 def compare_dates():
     form = request.form.to_dict()
@@ -307,7 +318,10 @@ def compare_dates():
 
         if duration_minutes < 30:
             raise ValueError("Arrival must be at least 30 minutes after departure.")
-
+        # This function is used to create a flight dictionary with the required features for prediction.
+        # It takes in the airline, departure time, and arrival time and returns a dictionary with 
+        # the airline, source, destination, stops, month, day, departure hour, departure minute, 
+        # arrival hour, arrival minute, and duration in minutes.
         def make_flight(a, dep, arr):
             return {
                 "Airline": a,
@@ -326,14 +340,13 @@ def compare_dates():
         # Predictions for all currently displayed airline cards.
         flights = [make_flight(a, departure, arrival) for a in all_airlines]
 
-        # Seven departure dates for the selected airline.
+        # this block makes a flight dictionary and appends it to the flights list for each day in the range of -3 to 3 days from the selected departure date.
         for offset in range(-3, 4):
             dep = departure + pd.Timedelta(days=offset)
             arr = arrival + pd.Timedelta(days=offset)
             flights.append(make_flight(compare_airline, dep, arr))
 
-        predictions, metadata = run_predictions(
-            flights,
+        # Gets the predictions and metadata for the flights for the airline comparison and date comparison.
             "date_comparison",
             all_airlines + [compare_airline] * 7,
             [departure.strftime("%Y-%m-%d")] * len(all_airlines)
@@ -343,9 +356,13 @@ def compare_dates():
             ],
             log_indices=range(len(all_airlines), len(flights)),
         )
+
+        # get the card prices and date prices from the predictions list. 
+        
         card_prices = predictions[:len(all_airlines)]
         date_prices = predictions[len(all_airlines):]
 
+        # get the interval, margin, and coverage from the metadata for the prediction interval.
         interval = metadata["prediction_interval"]
         margin = interval["margin"]
         coverage = interval["coverage"]
@@ -357,7 +374,7 @@ def compare_dates():
                 f"to Rs. {price + margin:,.2f}"
             )
 
-        # Rebuild the additional airline cards.
+        # Build the airline comparison table.
         airline_comparisons = []
 
         for a, price in zip(selected_airlines, card_prices[1:]):
@@ -428,7 +445,7 @@ def compare_dates():
             500,
         )
 
-
+# This route is used to compare flight prices for different airlines for the same departure date.
 @app.route("/compare-airlines", methods=["POST"])
 def compare_airlines():
     form = request.form.to_dict()
@@ -440,7 +457,8 @@ def compare_airlines():
     selected_airlines = request.form.getlist("selected_airlines")
     new_airline = form.get("other_airline", "")
     selected_airlines.append(new_airline)
-
+    # this block limits the number of airlines that can be compared to 2 and checks for duplicates and invalid airlines. 
+    # as well as validation checks
     if (
         len(selected_airlines) > 2
         or len(set([airline] + selected_airlines)) != len(selected_airlines) + 1
@@ -453,8 +471,10 @@ def compare_airlines():
             show_home(error_text="Invalid airline comparison.", form_values=form),
             400,
         )
-
+    # this block validates the departure and arrival times, calculates the duration, 
+    # and prepares the flight data for prediction. It also handles exceptions and logs predictions in case of errors.
     try:
+        # convert the departure and arrival times from the form to datetime objects and calculate the duration in minutes
         departure = pd.to_datetime(form["Dep_Time"], format="%Y-%m-%dT%H:%M")
         arrival = pd.to_datetime(form["Arrival_Time"], format="%Y-%m-%dT%H:%M")
         duration_minutes = int((arrival - departure).total_seconds() / 60)
@@ -463,7 +483,7 @@ def compare_airlines():
             raise ValueError("Arrival must be at least 30 minutes after departure.")
 
         flights = []
-
+        # build a list of flight dictionaries for the selected airline and any additional airlines to compare.
         for a in [airline] + selected_airlines:
             flights.append(
                 {
@@ -539,7 +559,9 @@ def compare_airlines():
             500,
         )
 
-
+# this route is used to display the admin page, which shows the list of registered models and the most 
+# recent predictions from the database. It retrieves the list of models and predictions, sorts the 
+# predictions by timestamp in descending order, and renders the admin.html template with the models and predictions data.
 @app.route("/admin")
 def admin():
     models = list_models()
