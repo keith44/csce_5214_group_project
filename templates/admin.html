@@ -61,42 +61,58 @@
         </table>
         <h3 class="mt-5">Prediction History</h3>
 
-        <table class="table table-bordered bg-white mt-3">
-            <thead>
-                <tr>
-                    <th>Timestamp</th>
-                    <th>Model Version</th>
-                    <th>Predicted Fare</th>
-                    <th>Response Time (ms)</th>
-                    <th>Status</th>
-                    <th>Error</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for prediction in predictions %}
-                <tr>
-                    <td>{{ prediction.timestamp }}</td>
-                    <td>{{ prediction.model_version }}</td>
-                    <td>
-                        {% if prediction.predicted_price is not none %}
-                        Rs. {{ "%.2f"|format(prediction.predicted_price) }}
-                        {% else %}
-                        -
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if prediction.response_time_ms is not none %}
-                        {{ "%.2f"|format(prediction.response_time_ms) }}
-                        {% else %}
-                        -
-                        {% endif %}
-                    </td>
-                    <td>{{ prediction.status }}</td>
-                    <td>{{ prediction.error_message or "-" }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+        <div class="table-responsive">
+
+            <table class="table table-bordered bg-white mt-3">
+                <thead>
+
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Model Version</th>
+                            <th>Prediction Type</th>
+                            <th>Airline</th>
+                            <th>Departure Date</th>
+                            <th>Predicted Fare</th>
+                            <th>Response Time (ms)</th>
+                            <th>Status</th>
+                            <th>Error</th>
+                        </tr>
+                    </thead>
+
+                </thead>
+                <tbody>
+                    {% for prediction in predictions %}
+                    <tr>
+                        <td>{{ prediction.timestamp }}</td>
+                        <td>{{ prediction.model_version }}</td>
+
+                        <td>{{ prediction.prediction_type or "-" }}</td>
+                        <td>{{ prediction.airline or "-" }}</td>
+                        <td>{{ prediction.departure_date or "-" }}</td>
+
+                        <td>
+                            {% if prediction.predicted_price is not none %}
+                            Rs. {{ "%.2f"|format(prediction.predicted_price) }}
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if prediction.response_time_ms is not none %}
+                            {{ "%.2f"|format(prediction.response_time_ms) }}
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
+                        <td>{{ prediction.status }}</td>
+                        <td>{{ prediction.error_message or "-" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
         <h3 class="mt-5">Register New Model</h3>
 
         <form action="{{ url_for('admin_register') }}" method="post" enctype="multipart/form-data"

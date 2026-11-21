@@ -50,6 +50,31 @@ valid_flights = {
 }
 
 
+def run_predictions(flights, prediction_type, airlines, dates, log_indices=None):
+    start = perf_counter()
+
+    model, metadata, version = get_model()
+    prices = model.predict(pd.DataFrame(flights))
+
+    response_time = (perf_counter() - start) * 1000
+
+    if log_indices is None:
+        log_indices = range(len(prices))
+
+    for i in log_indices:
+        log_prediction(
+            version,
+            float(prices[i]),
+            response_time,
+            "success",
+            prediction_type=prediction_type,
+            airline=airlines[i],
+            departure_date=dates[i],
+        )
+
+    return prices, metadata
+
+
 def show_home(
     prediction_text="",
     error_text="",
@@ -178,10 +203,14 @@ def predict():
 
         start = perf_counter()
 
-        model, metadata, version = get_model()
+        prices, metadata = run_predictions(
+            flight.to_dict(orient="records"),
+            "original",
+            [airline],
+            [departure.strftime("%Y-%m-%d")],
+        )
 
-        predicted_fare = float(model.predict(flight)[0])
-
+        predicted_fare = float(prices[0])
         interval = metadata["prediction_interval"]
         margin = interval["margin"]
         coverage = interval["coverage"]
@@ -191,8 +220,7 @@ def predict():
 
         response_time = (perf_counter() - start) * 1000
 
-        log_prediction(version, predicted_fare, response_time, "success")
-
+       
         flash(
             {
                 "prediction_text": f"Rs. {predicted_fare:,.2f}",
@@ -304,18 +332,19 @@ def compare_dates():
             arr = arrival + pd.Timedelta(days=offset)
             flights.append(make_flight(compare_airline, dep, arr))
 
-        start = perf_counter()
-
-        model, metadata, version = get_model()
-        predictions = model.predict(pd.DataFrame(flights))
-
-        response_time = (perf_counter() - start) * 1000
-
-        for price in predictions:
-            log_prediction(version, float(price), response_time, "success")
-            
-        card_prices = predictions[: len(all_airlines)]
-        date_prices = predictions[len(all_airlines) :]
+        predictions, metadata = run_predictions(
+            flights,
+            "date_comparison",
+            all_airlines + [compare_airline] * 7,
+            [departure.strftime("%Y-%m-%d")] * len(all_airlines)
+            + [
+                (departure + pd.Timedelta(days=i)).strftime("%Y-%m-%d")
+                for i in range(-3, 4)
+            ],
+            log_indices=range(len(all_airlines), len(flights)),
+        )
+        card_prices = predictions[:len(all_airlines)]
+        date_prices = predictions[len(all_airlines):]
 
         interval = metadata["prediction_interval"]
         margin = interval["margin"]
@@ -452,8 +481,13 @@ def compare_airlines():
                 }
             )
 
-        model, metadata, version = get_model()
-        prices = model.predict(pd.DataFrame(flights))
+        prices, metadata = run_predictions(
+            flights,
+            "airline_comparison",
+            [airline] + selected_airlines,
+            [departure.strftime("%Y-%m-%d")] * len(flights),
+            log_indices=[len(flights) - 1],
+        )
 
         interval = metadata["prediction_interval"]
         margin = interval["margin"]
@@ -504,18 +538,17 @@ def compare_airlines():
             show_home(error_text="Unable to compare airlines.", form_values=form),
             500,
         )
+
+
 @app.route("/admin")
 def admin():
     models = list_models()
-    predictions = get_predictions().sort_values(
-        "timestamp", ascending=False
-    ).head(20)
+    predictions = get_predictions().sort_values("timestamp", ascending=False).head(20)
 
     return render_template(
-        "admin.html",
-        models=models,
-        predictions=predictions.to_dict(orient="records")
+        "admin.html", models=models, predictions=predictions.to_dict(orient="records")
     )
+
 
 @app.route("/admin/register", methods=["POST"])
 def admin_register():
