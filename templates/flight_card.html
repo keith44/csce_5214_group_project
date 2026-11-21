@@ -1,0 +1,63 @@
+<div class="card shadow-sm h-100">
+    <div class="card-header bg-light">
+        <h5 class="mb-0">{{ flight.title }}</h5>
+    </div>
+    <div class="card-body">
+        <div class="row text-left">
+            <div class="col-6 mb-3">
+                <strong>Route</strong>
+                <div>{{ flight.source }} to {{ flight.destination }}</div>
+            </div>
+            <div class="col-6 mb-3">
+                <strong>Airline</strong>
+                <div>{{ flight.airline }}</div>
+            </div>
+            <div class="col-6 mb-3">
+                <strong>Stops</strong>
+                <div>{{ flight.stops }}</div>
+            </div>
+            <div class="col-6 mb-3">
+                <strong>Duration</strong>
+                <div>{{ flight.duration }}</div>
+            </div>
+            <div class="col-6 mb-3">
+                <strong>Departure</strong>
+                <div>{{ flight.departure }}</div>
+            </div>
+            <div class="col-6 mb-3">
+                <strong>Arrival</strong>
+                <div>{{ flight.arrival }}</div>
+            </div>
+        </div>
+        <hr>
+        <div class="text-center">
+            <div class="prediction-label">Estimated Flight Fare</div>
+            <div class="prediction-price">{{ flight.price }}</div>
+            <div class="prediction-interval">{{ flight.interval }}</div>
+        </div>
+
+        <form action="{{ url_for('compare_dates') }}" method="post" class="mt-3 text-center">
+
+            {% for key, value in form_values.items() %}
+            {% if key not in ['other_airline', 'selected_airlines', 'compare_airline'] %}
+            <input type="hidden" name="{{ key }}" value="{{ value }}">
+            {% endif %}
+            {% endfor %}
+
+            <!-- Compare dates for this card's airline -->
+            <input type="hidden" name="compare_airline" value="{{ flight.airline }}">
+
+            <!-- Preserve all airline comparison cards -->
+            {% for card in flight_cards %}
+            {% if not card.original %}
+            <input type="hidden" name="selected_airlines" value="{{ card.airline }}">
+            {% endif %}
+            {% endfor %}
+
+            <button type="submit" class="btn btn-outline-primary btn-sm">
+                Compare ±3 Days
+            </button>
+        </form>
+
+    </div>
+</div>

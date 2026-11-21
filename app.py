@@ -50,15 +50,73 @@ valid_flights = {
 }
 
 
-def show_home(prediction_text="", error_text="", form_values=None, interval_text=""):
+def show_home(
+    prediction_text="",
+    error_text="",
+    form_values=None,
+    interval_text="",
+    flight_summary=None,
+    date_comparison=None,
+    potential_savings="",
+    date_comparison_airline="",
+    airline_comparisons=None,
+):
+
+    form_values = form_values or {}
+    airline_comparisons = airline_comparisons or []
+    flight_cards = []
+
+    # Original flight prediction
+    if flight_summary:
+        flight_cards.append(
+            {
+                **flight_summary,
+                "title": "Flight Summary",
+                "price": prediction_text,
+                "interval": interval_text,
+                "original": True,
+            }
+        )
+
+    # Additional airline predictions
+    for comparison in airline_comparisons:
+        flight_cards.append(
+            {
+                **flight_summary,
+                "title": "Airline Comparison",
+                "airline": comparison["airline"],
+                "price": comparison["price"],
+                "interval": comparison["interval"],
+                "original": False,
+            }
+        )
+
+    # Find valid airlines that haven't already been selected.
+    used_airlines = {flight["airline"] for flight in flight_cards}
+
+    available_airlines = sorted(
+        {
+            row["Airline"]
+            for row in flight_options
+            if row["Source"] == form_values.get("Source")
+            and row["Destination"] == form_values.get("Destination")
+            and str(row["stops"]) == form_values.get("stops")
+            and row["Airline"] not in used_airlines
+        }
+    )
+
     return render_template(
         "home.html",
         sources=sources,
         flight_options=flight_options,
         prediction_text=prediction_text,
-        interval_text=interval_text,
         error_text=error_text,
-        form_values=form_values or {},
+        flight_cards=flight_cards,
+        available_airlines=available_airlines,
+        date_comparison=date_comparison,
+        date_comparison_airline=date_comparison_airline,
+        potential_savings=potential_savings,
+        form_values=form_values,
     )
 
 
@@ -142,6 +200,15 @@ def predict():
                     f"{coverage:.0%} prediction interval: "
                     f"Rs. {lower:,.2f} to Rs. {upper:,.2f}"
                 ),
+                "flight_summary": {
+                    "source": source,
+                    "destination": destination,
+                    "airline": airline,
+                    "stops": int(stops),
+                    "departure": departure.strftime("%b %d, %Y %I:%M %p"),
+                    "arrival": arrival.strftime("%b %d, %Y %I:%M %p"),
+                    "duration": f"{duration_minutes // 60}h {duration_minutes % 60}m",
+                },
                 "form_values": form,
             },
             "prediction",
@@ -175,14 +242,261 @@ def predict():
         )
 
 
-@app.route("/admin")
-def admin():
-    models = list_models()
-    predictions = get_predictions().sort_values("timestamp", ascending=False).head(20)
+@app.route("/compare-dates", methods=["POST"])
+def compare_dates():
+    form = request.form.to_dict()
 
-    return render_template(
-        "admin.html", models=models, predictions=predictions.to_dict(orient="records")
-    )
+    source = form.get("Source", "")
+    destination = form.get("Destination", "")
+    airline = form.get("airline", "")
+    stops = form.get("stops", "")
+
+    compare_airline = form.get("compare_airline", airline)
+    selected_airlines = request.form.getlist("selected_airlines")
+    all_airlines = [airline] + selected_airlines
+
+    # Validate the requested comparison.
+    if (
+        len(selected_airlines) > 2
+        or len(set(all_airlines)) != len(all_airlines)
+        or compare_airline not in all_airlines
+        or any(
+            (source, destination, a, stops) not in valid_flights for a in all_airlines
+        )
+    ):
+        return (
+            show_home(
+                error_text="Invalid airline or date comparison.", form_values=form
+            ),
+            400,
+        )
+
+    try:
+        departure = pd.to_datetime(form["Dep_Time"], format="%Y-%m-%dT%H:%M")
+        arrival = pd.to_datetime(form["Arrival_Time"], format="%Y-%m-%dT%H:%M")
+
+        duration_minutes = int((arrival - departure).total_seconds() / 60)
+
+        if duration_minutes < 30:
+            raise ValueError("Arrival must be at least 30 minutes after departure.")
+
+        def make_flight(a, dep, arr):
+            return {
+                "Airline": a,
+                "Source": source,
+                "Destination": destination,
+                "stops": int(stops),
+                "month": dep.month,
+                "day": dep.day,
+                "departure_hour": dep.hour,
+                "departure_minute": dep.minute,
+                "arrival_hour": arr.hour,
+                "arrival_minute": arr.minute,
+                "minutes": duration_minutes,
+            }
+
+        # Predictions for all currently displayed airline cards.
+        flights = [make_flight(a, departure, arrival) for a in all_airlines]
+
+        # Seven departure dates for the selected airline.
+        for offset in range(-3, 4):
+            dep = departure + pd.Timedelta(days=offset)
+            arr = arrival + pd.Timedelta(days=offset)
+            flights.append(make_flight(compare_airline, dep, arr))
+
+        model, metadata, version = get_model()
+        predictions = model.predict(pd.DataFrame(flights))
+
+        card_prices = predictions[: len(all_airlines)]
+        date_prices = predictions[len(all_airlines) :]
+
+        interval = metadata["prediction_interval"]
+        margin = interval["margin"]
+        coverage = interval["coverage"]
+
+        def format_interval(price):
+            return (
+                f"{coverage:.0%} prediction interval: "
+                f"Rs. {max(0, price - margin):,.2f} "
+                f"to Rs. {price + margin:,.2f}"
+            )
+
+        # Rebuild the additional airline cards.
+        airline_comparisons = []
+
+        for a, price in zip(selected_airlines, card_prices[1:]):
+            airline_comparisons.append(
+                {
+                    "airline": a,
+                    "price": f"Rs. {float(price):,.2f}",
+                    "interval": format_interval(float(price)),
+                }
+            )
+
+        # Build the seven-day comparison table.
+        lowest_price = float(min(date_prices))
+        selected_price = float(date_prices[3])
+        savings = max(0, selected_price - lowest_price)
+
+        comparison = []
+
+        for offset, price in zip(range(-3, 4), date_prices):
+            date = departure + pd.Timedelta(days=offset)
+
+            comparison.append(
+                {
+                    "date": date.strftime("%b %d, %Y"),
+                    "price": f"Rs. {float(price):,.2f}",
+                    "selected": offset == 0,
+                    "cheapest": float(price) == lowest_price,
+                }
+            )
+
+        original_price = float(card_prices[0])
+
+        flash(
+            {
+                "prediction_text": f"Rs. {original_price:,.2f}",
+                "interval_text": format_interval(original_price),
+                "flight_summary": {
+                    "source": source,
+                    "destination": destination,
+                    "airline": airline,
+                    "stops": int(stops),
+                    "departure": departure.strftime("%b %d, %Y %I:%M %p"),
+                    "arrival": arrival.strftime("%b %d, %Y %I:%M %p"),
+                    "duration": f"{duration_minutes // 60}h {duration_minutes % 60}m",
+                },
+                "airline_comparisons": airline_comparisons,
+                "date_comparison": comparison,
+                "date_comparison_airline": compare_airline,
+                "potential_savings": f"Rs. {savings:,.2f}",
+                "form_values": {
+                    **form,
+                    "airline": airline,
+                },
+            },
+            "prediction",
+        )
+
+        return redirect(url_for("home"), code=303)
+
+    except (ValueError, KeyError) as error:
+        return show_home(error_text=str(error), form_values=form), 400
+    except Exception:
+        app.logger.exception("Date comparison failed")
+        return (
+            show_home(
+                error_text="Unable to compare departure dates.", form_values=form
+            ),
+            500,
+        )
+
+
+@app.route("/compare-airlines", methods=["POST"])
+def compare_airlines():
+    form = request.form.to_dict()
+    source = form.get("Source", "")
+    destination = form.get("Destination", "")
+    airline = form.get("airline", "")
+    stops = form.get("stops", "")
+
+    selected_airlines = request.form.getlist("selected_airlines")
+    new_airline = form.get("other_airline", "")
+    selected_airlines.append(new_airline)
+
+    if (
+        len(selected_airlines) > 2
+        or len(set([airline] + selected_airlines)) != len(selected_airlines) + 1
+        or any(
+            (source, destination, a, stops) not in valid_flights
+            for a in [airline] + selected_airlines
+        )
+    ):
+        return (
+            show_home(error_text="Invalid airline comparison.", form_values=form),
+            400,
+        )
+
+    try:
+        departure = pd.to_datetime(form["Dep_Time"], format="%Y-%m-%dT%H:%M")
+        arrival = pd.to_datetime(form["Arrival_Time"], format="%Y-%m-%dT%H:%M")
+        duration_minutes = int((arrival - departure).total_seconds() / 60)
+
+        if duration_minutes < 30:
+            raise ValueError("Arrival must be at least 30 minutes after departure.")
+
+        flights = []
+
+        for a in [airline] + selected_airlines:
+            flights.append(
+                {
+                    "Airline": a,
+                    "Source": source,
+                    "Destination": destination,
+                    "stops": int(stops),
+                    "month": departure.month,
+                    "day": departure.day,
+                    "departure_hour": departure.hour,
+                    "departure_minute": departure.minute,
+                    "arrival_hour": arrival.hour,
+                    "arrival_minute": arrival.minute,
+                    "minutes": duration_minutes,
+                }
+            )
+
+        model, metadata, version = get_model()
+        prices = model.predict(pd.DataFrame(flights))
+
+        interval = metadata["prediction_interval"]
+        margin = interval["margin"]
+        coverage = interval["coverage"]
+
+        def format_interval(price):
+            return (
+                f"{coverage:.0%} prediction interval: "
+                f"Rs. {max(0, price - margin):,.2f} "
+                f"to Rs. {price + margin:,.2f}"
+            )
+
+        comparisons = [
+            {
+                "airline": a,
+                "price": f"Rs. {float(price):,.2f}",
+                "interval": format_interval(float(price)),
+            }
+            for a, price in zip(selected_airlines, prices[1:])
+        ]
+
+        flash(
+            {
+                "prediction_text": f"Rs. {float(prices[0]):,.2f}",
+                "interval_text": format_interval(float(prices[0])),
+                "flight_summary": {
+                    "source": source,
+                    "destination": destination,
+                    "airline": airline,
+                    "stops": int(stops),
+                    "departure": departure.strftime("%b %d, %Y %I:%M %p"),
+                    "arrival": arrival.strftime("%b %d, %Y %I:%M %p"),
+                    "duration": f"{duration_minutes // 60}h {duration_minutes % 60}m",
+                },
+                "airline_comparisons": comparisons,
+                "form_values": form,
+            },
+            "prediction",
+        )
+
+        return redirect(url_for("home"), code=303)
+
+    except (ValueError, KeyError) as error:
+        return show_home(error_text=str(error), form_values=form), 400
+    except Exception:
+        app.logger.exception("Airline comparison failed")
+        return (
+            show_home(error_text="Unable to compare airlines.", form_values=form),
+            500,
+        )
 
 
 @app.route("/admin/register", methods=["POST"])
