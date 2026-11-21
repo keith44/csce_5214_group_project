@@ -1,0 +1,25 @@
+{
+    "algorithm": "XGBoost",
+    "features": [
+        "Airline",
+        "Source",
+        "Destination",
+        "stops",
+        "month",
+        "day",
+        "departure_hour",
+        "departure_minute",
+        "arrival_hour",
+        "arrival_minute",
+        "minutes"
+    ],
+    "trained_at": "2026-11-14T17:14:13.828704+00:00",
+    "validation_r2": 0.7381097078323364,
+    "validation_mae": 1285.065673828125,
+    "validation_rmse": 2001.2315583160287,
+    "prediction_interval": {
+        "coverage": 0.9,
+        "margin": 4724.06005859375
+    },
+    "version": "v33"
+}

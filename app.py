@@ -304,9 +304,16 @@ def compare_dates():
             arr = arrival + pd.Timedelta(days=offset)
             flights.append(make_flight(compare_airline, dep, arr))
 
+        start = perf_counter()
+
         model, metadata, version = get_model()
         predictions = model.predict(pd.DataFrame(flights))
 
+        response_time = (perf_counter() - start) * 1000
+
+        for price in predictions:
+            log_prediction(version, float(price), response_time, "success")
+            
         card_prices = predictions[: len(all_airlines)]
         date_prices = predictions[len(all_airlines) :]
 
@@ -497,7 +504,18 @@ def compare_airlines():
             show_home(error_text="Unable to compare airlines.", form_values=form),
             500,
         )
+@app.route("/admin")
+def admin():
+    models = list_models()
+    predictions = get_predictions().sort_values(
+        "timestamp", ascending=False
+    ).head(20)
 
+    return render_template(
+        "admin.html",
+        models=models,
+        predictions=predictions.to_dict(orient="records")
+    )
 
 @app.route("/admin/register", methods=["POST"])
 def admin_register():
