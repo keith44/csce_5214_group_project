@@ -27,6 +27,10 @@ app.secret_key = os.environ.get("SECRET_KEY", "flight-project-local-development"
 # initialize prediction monitor database
 init_db()
 
+# Load the active model when the application starts.
+# This avoids loading the model during the first user prediction.
+get_model()
+
 # The available choices come from train.csv, replacing the hardcoded airline/city lists in the home.html template.
 training_data = pd.read_csv(
     BASE_DIR / "train.csv",
